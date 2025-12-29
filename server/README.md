@@ -1,66 +1,80 @@
 # Mix Download Server
 
-שרת Python להורדת שירים מיוטיוב וספוטיפיי.
+Flask server for downloading audio from YouTube and Spotify using yt-dlp.
 
-## התקנה
+## Local Testing
 
-```bash
-cd server
-pip install -r requirements.txt
+1. Install ffmpeg:
+   - **Mac**: `brew install ffmpeg`
+   - **Ubuntu/Debian**: `sudo apt install ffmpeg`
+   - **Windows**: `winget install ffmpeg`
+
+2. Install Python dependencies:
+   ```bash
+   cd server
+   pip install -r requirements.txt
+   ```
+
+3. Run the server:
+   ```bash
+   python app.py
+   ```
+
+The server will run on http://localhost:5000
+
+---
+
+## Deploy to Render.com
+
+### Using Docker (Recommended)
+
+1. Go to https://render.com and create an account
+2. Click "New" → "Web Service"
+3. Connect your GitHub repo (or use "Public Git repository")
+4. Set the following:
+   - **Name**: `notellamix-server`
+   - **Root Directory**: `server`
+   - **Runtime**: `Docker`
+   - **Instance Type**: Free (or Starter for better performance)
+
+5. Click "Create Web Service"
+6. Wait for the build to complete
+7. Copy your Render URL (e.g., `https://notellamix-server.onrender.com`)
+
+---
+
+## After Deploying
+
+1. Copy your Render URL (e.g., `https://notellamix-server.onrender.com`)
+2. In Lovable, go to Settings → Secrets
+3. Add a secret: `VITE_BACKEND_URL` = your Render URL (without trailing slash)
+4. The app will connect to your deployed server!
+
+---
+
+## API Endpoints
+
+### GET /health
+Health check endpoint
+
+### POST /download
+Download audio from YouTube or Spotify
+```json
+{
+  "query": "song name or YouTube/Spotify URL"
+}
+```
+Response:
+```json
+{
+  "success": true,
+  "file_id": "uuid",
+  "title": "Song Title"
+}
 ```
 
-## דרישות נוספות
+### GET /file/<file_id>
+Get the downloaded WAV file
 
-ודא ש-**ffmpeg** מותקן במחשב:
-
-**Windows:**
-```bash
-winget install ffmpeg
-```
-
-**Mac:**
-```bash
-brew install ffmpeg
-```
-
-**Linux:**
-```bash
-sudo apt install ffmpeg
-```
-
-## הפעלה
-
-```bash
-python app.py
-```
-
-השרת ירוץ ב-`http://localhost:5000`
-
-## שימוש
-
-השרת חושף את ה-endpoints הבאים:
-
-- `GET /health` - בדיקת תקינות
-- `POST /download` - הורדת שיר
-  ```json
-  { "query": "שם שיר או קישור ליוטיוב/ספוטיפיי" }
-  ```
-- `GET /file/<file_id>` - קבלת קובץ שהורד
-- `DELETE /cleanup/<file_id>` - מחיקת קובץ
-
-## חשיפה לאינטרנט (לשימוש עם Lovable)
-
-כדי שהאפליקציה תוכל לגשת לשרת, תצטרך לחשוף אותו לאינטרנט:
-
-**אפשרות 1: ngrok (הכי קל)**
-```bash
-ngrok http 5000
-```
-תקבל URL כמו `https://abc123.ngrok.io`
-
-**אפשרות 2: Cloudflare Tunnel**
-```bash
-cloudflared tunnel --url http://localhost:5000
-```
-
-העתק את ה-URL שתקבל והזן אותו באפליקציה.
+### DELETE /cleanup/<file_id>
+Delete a downloaded file
