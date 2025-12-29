@@ -52,47 +52,22 @@ serve(async (req) => {
 
     const systemPrompt = `אתה מנתח מיקסים מוזיקליים לכוריאוגרפים. תפקידך לקרוא בקשות בעברית (או אנגלית) ולחלץ מהן מבנה מדויק של מיקס.
 
-חובה להחזיר JSON תקין בפורמט הבא:
-{
-  "events": [
-    {
-      "id": "unique-id",
-      "type": "song" | "fade-in" | "fade-out" | "effect",
-      "songName": "שם השיר להצגה",
-      "songQuery": "שאילתת חיפוש ליוטיוב (שם השיר + אמן)",
-      "spotifyUrl": "קישור ספוטיפיי אם סופק",
-      "startTime": מספר_שניות_מתחילת_המיקס,
-      "duration": משך_בשניות,
-      "songStartOffset": נקודת_התחלה_בשיר_המקורי_בשניות,
-      "color": "צבע HSL לתצוגה"
-    }
-  ],
-  "steps": [
-    {
-      "id": "step-id",
-      "icon": "music" | "volume" | "effect" | "time",
-      "description": "תיאור מה קורה בעברית",
-      "timeRange": "0:00 - 0:30"
-    }
-  ],
-  "totalDuration": סה"כ_אורך_המיקס_בשניות,
-  "summary": "סיכום קצר של מה שהמיקס עושה בעברית"
-}
-
 חוקים:
 1. קרא בעיון את הפרומפט וזהה את כל השירים, הזמנים, ואפקטים
 2. אם יש קישור Spotify - שמור אותו ב-spotifyUrl וחלץ את שם השיר והאמן ל-songQuery
 3. Fade out = השיר יורד בהדרגה, Fade in = השיר עולה בהדרגה
 4. אם המשתמש אומר "תתחיל מ-00:47" - זה songStartOffset של 47 שניות
-5. בחר צבעים שונים לכל אירוע (hsla format)
+5. בחר צבעים שונים לכל אירוע (hsl format)
 6. אם יש אפקט כמו "בום" - סוג האירוע הוא "effect"
 7. חשב את totalDuration לפי סוף האירוע האחרון
 8. בשלבים (steps) תאר בעברית מה קורה בכל שלב
+9. אם הבקשה לא מכילה הוראות מיקס ברורות - החזר is_valid_mix_request: false
 
 דוגמה:
 אם המשתמש כותב "תנגן את השיר X למשך 25 שניות ואז תתחיל פייד אאוט של 10 שניות"
 זה אומר: שיר X מנוגן מ-0 עד 25, וה-fade out מתחיל ב-25 ונמשך 10 שניות (עד 35).`;
 
+    // Use tool calling to force structured output
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -105,6 +80,63 @@ serve(async (req) => {
           { role: "system", content: systemPrompt },
           { role: "user", content: prompt }
         ],
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: "create_mix",
+              description: "Create a music mix from the user's instructions",
+              parameters: {
+                type: "object",
+                properties: {
+                  is_valid_mix_request: {
+                    type: "boolean",
+                    description: "Whether the user's message contains valid mix instructions"
+                  },
+                  error_message: {
+                    type: "string",
+                    description: "If is_valid_mix_request is false, explain in Hebrew what information is needed to create a mix"
+                  },
+                  events: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        id: { type: "string" },
+                        type: { type: "string", enum: ["song", "fade-in", "fade-out", "effect"] },
+                        songName: { type: "string" },
+                        songQuery: { type: "string", description: "YouTube search query for the song" },
+                        spotifyUrl: { type: "string", description: "Spotify URL if provided" },
+                        startTime: { type: "number", description: "Start time in seconds from mix start" },
+                        duration: { type: "number", description: "Duration in seconds" },
+                        songStartOffset: { type: "number", description: "Offset in the original song in seconds" },
+                        color: { type: "string", description: "HSL color for display" }
+                      },
+                      required: ["id", "type", "songName", "startTime", "duration", "color"]
+                    }
+                  },
+                  steps: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        id: { type: "string" },
+                        icon: { type: "string", enum: ["music", "volume", "effect", "time"] },
+                        description: { type: "string" },
+                        timeRange: { type: "string" }
+                      },
+                      required: ["id", "icon", "description"]
+                    }
+                  },
+                  totalDuration: { type: "number", description: "Total mix duration in seconds" },
+                  summary: { type: "string", description: "Summary of the mix in Hebrew" }
+                },
+                required: ["is_valid_mix_request"]
+              }
+            }
+          }
+        ],
+        tool_choice: { type: "function", function: { name: "create_mix" } }
       }),
     });
 
@@ -131,20 +163,35 @@ serve(async (req) => {
     const data = await response.json();
     console.log("AI response:", JSON.stringify(data));
     
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) {
-      throw new Error("No content in AI response");
+    // Extract the tool call result
+    const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+    if (!toolCall || toolCall.function.name !== "create_mix") {
+      throw new Error("No valid tool call in AI response");
     }
 
-    // Extract JSON from the response (it might be wrapped in markdown code blocks)
-    let jsonStr = content;
-    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (jsonMatch) {
-      jsonStr = jsonMatch[1];
+    const mixData = JSON.parse(toolCall.function.arguments);
+    console.log("Parsed mix data:", JSON.stringify(mixData));
+
+    // Check if it's a valid mix request
+    if (!mixData.is_valid_mix_request) {
+      const errorMessage = mixData.error_message || "אנא תאר מיקס עם שירים, זמנים, ומעברים. לדוגמה: 'תנגן את השיר X למשך 30 שניות ואז עבור לשיר Y עם פייד אאוט'";
+      return new Response(JSON.stringify({ 
+        success: false, 
+        mix: null,
+        message: errorMessage
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    const parsedMix: ParsedMix = JSON.parse(jsonStr.trim());
-    console.log("Parsed mix:", JSON.stringify(parsedMix));
+    const parsedMix: ParsedMix = {
+      events: mixData.events || [],
+      steps: mixData.steps || [],
+      totalDuration: mixData.totalDuration || 0,
+      summary: mixData.summary || ""
+    };
+
+    console.log("Final parsed mix:", JSON.stringify(parsedMix));
 
     return new Response(JSON.stringify({ 
       success: true, 
