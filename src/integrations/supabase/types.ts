@@ -14,7 +14,30 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      mixes: {
+        Row: {
+          audio_urls: string[] | null
+          created_at: string
+          id: string
+          parsed_mix: Json | null
+          user_prompt: string
+        }
+        Insert: {
+          audio_urls?: string[] | null
+          created_at?: string
+          id?: string
+          parsed_mix?: Json | null
+          user_prompt: string
+        }
+        Update: {
+          audio_urls?: string[] | null
+          created_at?: string
+          id?: string
+          parsed_mix?: Json | null
+          user_prompt?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

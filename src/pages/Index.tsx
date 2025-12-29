@@ -7,7 +7,9 @@ import MixTimeline from "@/components/MixTimeline";
 import MixDescription from "@/components/MixDescription";
 import WaveformVisualizer from "@/components/WaveformVisualizer";
 import DiscoBall from "@/components/DiscoBall";
-import { Play, Download, RotateCcw } from "lucide-react";
+import FileDropZone from "@/components/FileDropZone";
+import { useMixParser, ParsedMix, MixEvent, MixStep } from "@/hooks/useMixParser";
+import { Play, Download, RotateCcw, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface Message {
@@ -15,6 +17,12 @@ interface Message {
   content: string;
   isUser: boolean;
   timestamp: string;
+}
+
+interface UploadedFile {
+  id: string;
+  file: File;
+  name: string;
 }
 
 interface MixResult {
@@ -39,14 +47,17 @@ const Index = () => {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "welcome",
-      content: "שלום! אני Notellamix 🎵\nתאר לי את המיקס שאתה רוצה ליצור ואני אבנה אותו עבורך. אתה יכול לכתוב בעברית בשפה טבעית.",
+      content: "שלום! אני Notellamix 🎵\nתאר לי את המיקס שאתה רוצה ליצור ואני אבנה אותו עבורך.\n\nאתה יכול:\n• לכתוב בעברית בשפה טבעית\n• להדביק קישורי Spotify\n• לגרור קבצי אודיו למעלה\n\nנסה לתאר אילו שירים, מתי להתחיל, fades, ואפקטים.",
       isUser: false,
       timestamp: new Date().toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" }),
     },
   ]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [mixResult, setMixResult] = useState<MixResult | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [mixResult, setMixResult] = useState<MixResult | null>(null);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [showFileUpload, setShowFileUpload] = useState(false);
+  
+  const { parseMix, isLoading } = useMixParser();
 
   const handleSendMessage = async (content: string) => {
     const newMessage: Message = {
@@ -57,65 +68,41 @@ const Index = () => {
     };
 
     setMessages((prev) => [...prev, newMessage]);
-    setIsLoading(true);
 
-    // Simulate AI response - in production this would call the backend
-    setTimeout(() => {
-      // Parse the example prompt and generate a response
-      const mockResponse = generateMockResponse(content);
-      
-      const aiMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        content: mockResponse.message,
-        isUser: false,
-        timestamp: new Date().toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" }),
-      };
-
-      setMessages((prev) => [...prev, aiMessage]);
-      setMixResult(mockResponse.mixResult);
-      setIsLoading(false);
-    }, 2000);
-  };
-
-  const generateMockResponse = (input: string): { message: string; mixResult: MixResult } => {
-    // This is a mock - the real implementation would use AI
-    const isHebrewMixRequest = input.includes("אהבתיה") || input.includes("פייד") || input.includes("תתחיל");
-
-    if (isHebrewMixRequest) {
-      return {
-        message: `הבנתי את הבקשה! הנה מה שאני הולך לעשות:
-
-✅ מתחיל את "אהבתיה" מההתחלה
-✅ אחרי 20 שניות - מתחיל Fade Out של 10 שניות
-✅ במקביל - מתחיל Fade In של "What's Love" מדקה 0:47
-✅ "What's Love" ינוגן למשך 35 שניות
-✅ סיום עם אפקט בום ענק
-
-סה"כ אורך המיקס: 65 שניות`,
-        mixResult: {
-          totalDuration: 65,
-          events: [
-            { id: "1", type: "song", songName: "אהבתיה", startTime: 0, duration: 30, color: "hsla(160, 100%, 30%, 0.8)" },
-            { id: "2", type: "fade-out", songName: "Fade Out", startTime: 20, duration: 10, color: "hsla(0, 0%, 50%, 0.6)" },
-            { id: "3", type: "song", songName: "What's Love", startTime: 20, duration: 35, color: "hsla(0, 93%, 45%, 0.8)" },
-            { id: "4", type: "fade-in", songName: "Fade In", startTime: 20, duration: 8, color: "hsla(200, 80%, 50%, 0.6)" },
-            { id: "5", type: "effect", songName: "בום!", startTime: 55, duration: 5, color: "hsla(40, 100%, 50%, 0.9)" },
-          ],
-          steps: [
-            { id: "s1", icon: "music", description: "מתחיל לנגן את 'אהבתיה' מההתחלה", timeRange: "0:00 - 0:30" },
-            { id: "s2", icon: "volume", description: "Fade Out של 'אהבתיה' - יורד בהדרגה במשך 10 שניות", timeRange: "0:20 - 0:30" },
-            { id: "s3", icon: "music", description: "מתחיל את 'What's Love' מנקודה 0:47 של השיר המקורי", timeRange: "0:20" },
-            { id: "s4", icon: "volume", description: "Fade In של 'What's Love' - עולה בהדרגה", timeRange: "0:20 - 0:28" },
-            { id: "s5", icon: "effect", description: "אפקט סיום: בום ענק!", timeRange: "0:55 - 1:00" },
-          ],
-        },
-      };
+    // Add uploaded file names to context if any
+    let enrichedPrompt = content;
+    if (uploadedFiles.length > 0) {
+      const fileNames = uploadedFiles.map(f => f.name).join(", ");
+      enrichedPrompt = `${content}\n\n[קבצי אודיו שהועלו: ${fileNames}]`;
     }
 
-    return {
-      message: "אשמח לעזור לך ליצור מיקס! תאר לי אילו שירים אתה רוצה, מתי להתחיל כל שיר, האם לעשות מעברים הדרגתיים (fades), ואילו אפקטים להוסיף.",
-      mixResult: null as unknown as MixResult,
+    const { mix, message } = await parseMix(enrichedPrompt);
+    
+    const aiMessage: Message = {
+      id: (Date.now() + 1).toString(),
+      content: message,
+      isUser: false,
+      timestamp: new Date().toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" }),
     };
+
+    setMessages((prev) => [...prev, aiMessage]);
+
+    if (mix) {
+      // Convert ParsedMix to MixResult format
+      const result: MixResult = {
+        events: mix.events.map(e => ({
+          id: e.id,
+          type: e.type,
+          songName: e.songName,
+          startTime: e.startTime,
+          duration: e.duration,
+          color: e.color,
+        })),
+        steps: mix.steps,
+        totalDuration: mix.totalDuration,
+      };
+      setMixResult(result);
+    }
   };
 
   const handleReset = () => {
@@ -150,6 +137,38 @@ const Index = () => {
         <div className="flex-1 flex flex-col lg:flex-row gap-6 max-w-7xl mx-auto w-full">
           {/* Chat section */}
           <div className="flex-1 flex flex-col min-w-0">
+            {/* File upload toggle */}
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-4"
+            >
+              <Button
+                variant="ghost"
+                onClick={() => setShowFileUpload(!showFileUpload)}
+                className="w-full justify-between text-muted-foreground hover:text-foreground"
+              >
+                <span>העלאת קבצי אודיו ({uploadedFiles.length})</span>
+                {showFileUpload ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              </Button>
+              
+              <AnimatePresence>
+                {showFileUpload && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="mt-2"
+                  >
+                    <FileDropZone 
+                      files={uploadedFiles} 
+                      onFilesChange={setUploadedFiles} 
+                    />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </motion.div>
+
             {/* Messages */}
             <div className="flex-1 overflow-y-auto space-y-4 mb-4 max-h-[50vh] lg:max-h-[60vh] pr-2">
               <AnimatePresence mode="popLayout">
@@ -174,7 +193,7 @@ const Index = () => {
                     <span className="w-2 h-2 bg-accent rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
                     <span className="w-2 h-2 bg-accent rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
                   </div>
-                  <span className="text-sm">מעבד את הבקשה...</span>
+                  <span className="text-sm">מנתח את הבקשה עם AI...</span>
                 </motion.div>
               )}
             </div>
@@ -246,7 +265,7 @@ const Index = () => {
           transition={{ delay: 0.5 }}
           className="text-center mt-8 text-sm text-muted-foreground"
         >
-          💡 טיפ: תוכל לציין שמות שירים, זמנים, מעברי פייד, ואפקטים בשפה טבעית
+          💡 טיפ: תוכל לציין שמות שירים, קישורי Spotify, זמנים, מעברי פייד, ואפקטים בשפה טבעית
         </motion.footer>
       </div>
     </div>

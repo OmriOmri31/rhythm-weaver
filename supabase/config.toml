@@ -1,1 +1,4 @@
 project_id = "bvfgywumvzrfytagnncx"
+
+[functions.parse-mix]
+verify_jwt = false
